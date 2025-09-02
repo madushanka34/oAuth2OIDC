@@ -4,6 +4,7 @@ import com.authservice.authserviceoauth2.service.CustomJdbcOAuth2AuthorizationSe
 import com.authservice.authserviceoauth2.utility.PemUtils;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
 import jakarta.servlet.Filter;
@@ -30,6 +31,7 @@ import org.springframework.security.oauth2.server.authorization.OAuth2Authorizat
 import org.springframework.security.oauth2.server.authorization.client.JdbcRegisteredClientRepository;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClient;
 import org.springframework.security.oauth2.server.authorization.client.RegisteredClientRepository;
+import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.oauth2.server.authorization.oidc.web.OidcLogoutEndpointFilter;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
@@ -43,17 +45,25 @@ import org.springframework.security.web.context.HttpSessionSecurityContextReposi
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
+import static org.springframework.security.config.Customizer.withDefaults;
+
 @Configuration
 @EnableWebSecurity
 public class AuthorizationServerConfig {
 
+    private static final String STABLE_KEY_ID = UUID.randomUUID().toString();
+
+
     @Bean
+    @Order(1)
     public SecurityFilterChain authServerSecurityFilterChain(HttpSecurity http) throws Exception {
         // Create the Authorization Server configurer
         OAuth2AuthorizationServerConfigurer authorizationServerConfigurer = new OAuth2AuthorizationServerConfigurer();
@@ -96,25 +106,50 @@ public class AuthorizationServerConfig {
     }
 
     @Bean
-    public JWKSource<SecurityContext> jwkSource() throws Exception {
-        RSAKey rsaKey = loadRsaKey(); // Load from PEM files
+    public JWKSource<SecurityContext> jwkSource() {
+        RSAKey rsaKey = generateRsaKey();
         JWKSet jwkSet = new JWKSet(rsaKey);
-        return (jwkSelector, securityContext) -> jwkSelector.select(jwkSet);
+        return new ImmutableJWKSet<>(jwkSet);
     }
 
-    // Load RSA key from PEM files in resources folder
-    private RSAKey loadRsaKey() throws Exception {
-        String publicKeyPEM = new String(new ClassPathResource("public.pem").getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        String privateKeyPEM = new String(new ClassPathResource("private.pem").getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-
-        RSAPublicKey publicKey = PemUtils.parsePublicKey(publicKeyPEM);
-        RSAPrivateKey privateKey = PemUtils.parsePrivateKey(privateKeyPEM);
+    private static RSAKey generateRsaKey() {
+        KeyPair keyPair;
+        try {
+            KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+            keyPairGenerator.initialize(2048);
+            keyPair = keyPairGenerator.generateKeyPair();
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+        RSAPublicKey publicKey = (RSAPublicKey) keyPair.getPublic();
+        RSAPrivateKey privateKey = (RSAPrivateKey) keyPair.getPrivate();
 
         return new RSAKey.Builder(publicKey)
                 .privateKey(privateKey)
-                .keyID(UUID.randomUUID().toString())
+                .keyID(STABLE_KEY_ID)
                 .build();
     }
+
+    //for production
+//    @Bean
+//    public JWKSource<SecurityContext> jwkSource() throws Exception {
+//        RSAKey rsaKey = loadRsaKey(); // Load from PEM files
+//        JWKSet jwkSet = new JWKSet(rsaKey);
+//        return (jwkSelector, securityContext) -> jwkSelector.select(jwkSet);
+//    }
+    // Load RSA key from PEM files in resources folder
+//    private RSAKey loadRsaKey() throws Exception {
+//        String publicKeyPEM = new String(new ClassPathResource("public.pem").getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+//        String privateKeyPEM = new String(new ClassPathResource("private.pem").getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+//
+//        RSAPublicKey publicKey = PemUtils.parsePublicKey(publicKeyPEM);
+//        RSAPrivateKey privateKey = PemUtils.parsePrivateKey(privateKeyPEM);
+//
+//        return new RSAKey.Builder(publicKey)
+//                .privateKey(privateKey)
+//                .keyID(STABLE_KEY_ID)
+//                .build();
+//    }
 
 
     @Bean
@@ -136,16 +171,17 @@ public class AuthorizationServerConfig {
         return args -> {
             RegisteredClientRepository repository = new JdbcRegisteredClientRepository(jdbcTemplate);
 
-            if (repository.findByClientId("your-client-id") == null) {
+            if (repository.findByClientId("react-app-client-id") == null) {
                 RegisteredClient registeredClient = RegisteredClient.withId(UUID.randomUUID().toString())
-                        .clientId("your-client-id")
+                        .clientId("react-app-client-id")
                         .clientAuthenticationMethod(ClientAuthenticationMethod.NONE)
                         .authorizationGrantType(AuthorizationGrantType.AUTHORIZATION_CODE)
                         .authorizationGrantType(AuthorizationGrantType.REFRESH_TOKEN)
-                        .redirectUri("http://localhost:4200/callback")
-                        .redirectUri("http://localhost:4200/silent-refresh.html")
-                        .postLogoutRedirectUri("http://localhost:4200/callback")
+                        .redirectUri("http://localhost:3000/callback")
+                        .redirectUri("http://localhost:3000/silent-refresh.html")
+                        .postLogoutRedirectUri("http://localhost:3000")
                         .scope(OidcScopes.OPENID)
+                        .scope(OidcScopes.PROFILE)
                         .clientSettings(ClientSettings.builder()
                                 .requireAuthorizationConsent(true)
                                 .requireProofKey(true)
